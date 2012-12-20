@@ -1,267 +1,233 @@
 class Expr
-  attr_reader :expression
-
-  def initialize(expression_tree)
-    if expression_tree.length == 2
-      @expression = Unary.new(expression_tree)
-    else
-      @expression = Binary.new(expression_tree)
+  def self.build(expr_tree)
+    case expr_tree.first
+      when :number   then Number.new       expr_tree[1]
+      when :variable then Variable.new     expr_tree[1]
+      when :-        then -          build(expr_tree[1])
+      when :sin      then Sine.new   build(expr_tree[1])
+      when :cos      then Cosine.new build(expr_tree[1])
+      when :+        then build(expr_tree[1]) + (build expr_tree[2])
+      when :*        then build(expr_tree[1]) * (build expr_tree[2])
     end
   end
 
-  def self.build(expression_tree)
-    Expr.new(expression_tree)
+  def +(other)
+    Addition.new self, other
   end
 
-  def ==(other)
-    to_array == other.to_array
+  def *(other)
+    Multiplication.new self, other
   end
 
-  def method_missing(name, *args, &block)
-    @expression.send(name, *args, &block)
+  def -@
+    Negation.new self
   end
 
-  def to_array
-    @expression.expression.expression
-  end
-
-  def inspect
-    to_array
+  def derive(var)
+    derivative(var).simplify
   end
 end
 
 class Unary < Expr
-  def initialize(expression_tree)
-    case expression_tree[0]
-      when :number   then @expression = Number.new  (expression_tree)
-      when :variable then @expression = Variable.new(expression_tree)
-      when :-        then @expression = Negation.new(expression_tree)
-      when :sin      then @expression = Sine.new    (expression_tree)
-      when :cos      then @expression = Cosine.new  (expression_tree)
-    end
+  attr_reader :operand
+
+  def initialize(operand)
+    @operand = operand
   end
 
-  def argument
-    @expression[1]
+  def ==(other)
+    self.class == other.class and self.operand == other.operand
+  end
+
+  def exact?
+    operand.exact?
+  end
+
+  def simplify
+    self
   end
 end
 
 class Number < Unary
-  def initialize(expression_tree)
-    @expression = expression_tree
+  def evaluate(env = {})
+    operand
+  end
+
+  def self.zero
+    Number.new(0)
+  end
+
+  def self.one
+    Number.new(1)
+  end
+
+  def derivative(varible)
+    Number.zero
   end
 
   def exact?
     true
   end
 
-  def simplify
-    Expr.new(@expression)
-  end
-
-  def evaluate(scope = {})
-    argument
-  end
-
-  def derive(variable)
-    Expr.new([:number, 0])
+  def to_s
+    operand.to_s
   end
 end
 
 class Variable < Unary
-  def initialize(expression_tree)
-    @expression = expression_tree
+  def evaluate(env = {})
+    env.fetch operand
   end
 
-  def evaluate(scope = {})
-    scope[argument]
+  def derivative(var)
+    var == @operand ? Number.one : Number.zero
   end
 
   def exact?
     false
   end
 
-  def simplify
-    Expr.new([:variable, argument])
-  end
-
-  def derive(variable)
-    variable == argument ? Expr.new([:number, 1]) : Expr.new([:number, 0])
+  def to_s
+    operand.to_s
   end
 end
 
 class Negation < Unary
-  def initialize(expression_tree)
-    @expression = expression_tree
-  end
-
-  def evaluate(scope = {})
-    -Expr.new(argument).evaluate(scope)
-  end
-
-  def exact?
-    Expr.new(argument).exact?
+  def evaluate(env = {})
+    -operand.evaluate(env)
   end
 
   def simplify
     if exact?
-      Expr.new([:number, evaluate])
+      Number.new(-operand.simplify.evaluate)
     else
-      Expr.new([:-, Expr.new(argument).simplify.to_array])
+      Negation.new(operand.simplify)
     end
   end
 
-  def derive(variable)
-    new_argument = Expr.new(argument).derive(variable).to_array
-    Expr.new([:-, new_argument]).simplify
+  def derivative(var)
+    Negation.new operand.derivative(var)
+  end
+
+  def exact?
+    operand.exact?
+  end
+
+  def to_s
+    "-#{operand}"
   end
 end
 
 class Sine < Unary
-  def initialize(expression_tree)
-    @expression = expression_tree
-  end
-
-  def evaluate(scope = {})
-    Math.sin Expr.new(argument).evaluate(scope)
-  end
-
-  def exact?
-    Expr.new(argument).exact?
+  def evaluate(env = {})
+    Math.sin operand.evaluate(env)
   end
 
   def simplify
     if exact?
-      Expr.new [:number, evaluate]
+      Number.new Math.sin(operand.simplify.evaluate)
     else
-      Expr.new([:sin, Expr.new(argument).simplify.to_array])
+      Sine.new operand.simplify
     end
   end
 
-  def derive(variable)
-    inner_derivative = Expr.new(argument).derive(variable).to_array
-    Expr.new([:*, inner_derivative, [:cos, argument]]).simplify
+  def derivative(var)
+    operand.derivative(var) * Cosine.new(operand)
+  end
+
+  def to_s
+    "sin(#{operand})"
   end
 end
 
 class Cosine < Unary
-  def initialize(expression_tree)
-    @expression = expression_tree
-  end
-
-  def evaluate(scope = {})
-    Math.cos Expr.new(argument).evaluate(scope)
-  end
-
-  def exact?
-    Expr.new(argument).exact?
+  def evaluate(env = {})
+    Math.cos operand.evaluate(env)
   end
 
   def simplify
     if exact?
-      Expr.new [:number, evaluate]
+      Number.new Math.cos(operand.simplify.evaluate)
     else
-      Expr.new([:cos, Expr.new(argument).simplify.to_array])
+      Cosine.new operand.simplify
     end
   end
 
-  def derive(variable)
-    inner_derivative = Expr.new(argument).derive(variable).to_array
-    Expr.new([:*, inner_derivative, [:-, [:sin, argument]]]).simplify
+  def derivative(var)
+    operand.derivative(var) * -Sine.new(operand)
+  end
+
+  def to_s
+    "cos(#{operand})"
   end
 end
 
 class Binary < Expr
-  def initialize(expression_tree)
-    case expression_tree[0]
-      when :+ then @expression = Addition.new      (expression_tree)
-      when :* then @expression = Multiplication.new(expression_tree)
-    end
+  attr_reader :left_operand, :right_operand
+
+  def initialize(left_operand, right_operand)
+    @left_operand  = left_operand
+    @right_operand = right_operand
   end
 
-  def left_argument
-    @expression[1]
+  def ==(other)
+    self.class == other.class and
+      self.left_operand == other.left_operand and
+      self.right_operand == other.right_operand
   end
 
-  def right_argument
-    @expression[2]
+  def simplify
+    self.class.new left_operand.simplify, right_operand.simplify
+  end
+
+  def exact?
+    left_operand.simplify.exact? and right_operand.simplify.exact?
   end
 end
 
 class Addition < Binary
-  def initialize(expression_tree)
-    @expression = expression_tree
+  def evaluate(env = {})
+    left_operand.evaluate(env) + right_operand.evaluate(env)
   end
 
-  def evaluate(scope = {})
-    Expr.new(left_argument).evaluate(scope) + Expr.new(right_argument).evaluate(scope)
-  end
-
-  def exact?
-    Expr.new(left_argument).exact? && Expr.new(right_argument).exact?
-  end
-
-  def simplify
-    simplified_left = Expr.new(left_argument).simplify
-    simplified_right = Expr.new(right_argument).simplify
-    if exact?
-      Expr.new([:number, evaluate])
-    elsif simplified_left.exact? && simplified_left.evaluate == 0
-      simplified_right
-    elsif simplified_right.exact? && simplified_right.evaluate == 0
-      simplified_left
-    else
-      Expr.new([:+, simplified_left.to_array, simplified_right.to_array])
+ def simplify
+    if exact? then Number.new(left_operand.simplify.evaluate + right_operand.simplify.evaluate)
+    elsif left_operand  == Number.zero then right_operand.simplify
+    elsif right_operand == Number.zero then left_operand.simplify
+    else super
     end
   end
 
-  def derive(variable)
-    derivative_of_left_argument = Expr.new(left_argument).derive(variable).to_array
-    derivative_of_right_argument = Expr.new(right_argument).derive(variable).to_array
-    Expr.new([:+, derivative_of_left_argument, derivative_of_right_argument]).simplify
+  def derivative(var)
+    left_operand.derivative(var) + right_operand.derivative(var)
+  end
+
+  def to_s
+    "(#{left_operand} + #{right_operand})"
   end
 end
 
 class Multiplication < Binary
-  def initialize(expression_tree)
-    @expression = expression_tree
-  end
-
-  def evaluate(scope = {})
-    result = 0 if Expr.new(left_argument).exact? && Expr.new(left_argument).evaluate(scope) == 0
-    result = 0 if Expr.new(right_argument).exact? && Expr.new(right_argument).evaluate(scope) == 0
-    if result != 0
-      Expr.new(left_argument).evaluate(scope) * Expr.new(right_argument).evaluate(scope)
-    else
-      result
-    end
-  end
-
-  def exact?
-    result = Expr.new(left_argument).exact? && Expr.new(right_argument).exact?
-    result ||= Expr.new(left_argument).exact? && Expr.new(left_argument).evaluate == 0
-    result ||= Expr.new(right_argument).exact? && Expr.new(right_argument).evaluate == 0
+  def evaluate(env = {})
+    left_operand.evaluate(env) * right_operand.evaluate(env)
   end
 
   def simplify
-    simplified_left = Expr.new(left_argument).simplify
-    simplified_right = Expr.new(right_argument).simplify
-    if exact?
-      Expr.new([:number, evaluate])
-    elsif simplified_left.exact? && simplified_left.evaluate == 1
-      simplified_right
-    elsif simplified_right.exact? && simplified_right.evaluate == 1
-      simplified_left
-    else
-      Expr.new([:*, simplified_left.to_array, simplified_right.to_array])
+    if exact? then Number.new(left_operand.simplify.evaluate * right_operand.simplify.evaluate)
+    elsif left_operand  == Number.zero then Number.zero
+    elsif right_operand == Number.zero then Number.zero
+    elsif left_operand  == Number.one  then right_operand.simplify
+    elsif right_operand == Number.one  then left_operand.simplify
+    else super
     end
   end
 
-  def derive(variable)
-    left_derivative = Expr.new(left_argument).derive(variable)
-    right_derivative = Expr.new(right_argument).derive(variable)
-    new_left_argument = [:*, left_derivative.to_array, right_argument]
-    new_right_argument = [:*, left_argument, right_derivative.to_array]
-    Expr.new([:+, new_left_argument, new_right_argument]).simplify
+  def derivative(var)
+    left_operand.derivative(var) * right_operand + left_operand * right_operand.derivative(var)
+  end
+
+  def to_s
+    "(#{left_operand} * #{right_operand})"
   end
 end
+

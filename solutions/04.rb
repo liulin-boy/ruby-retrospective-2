@@ -1,95 +1,119 @@
+module Patterns
+  TLD           = /\b[a-z]{2,3}(\.[a-z]{2})?\b/i
+  HOSTNAME_PART = /\b[0-9a-z]([0-9a-z\-]{,61}[0-9a-z])?\b/i
+  DOMAIN        = /\b#{HOSTNAME_PART}\.#{TLD}\b/i
+  HOSTNAME      = /\b(#{HOSTNAME_PART}\.)+#{TLD}\b/i
+  EMAIL         = /\b(?<username>[a-z0-9][\w_\-+\.]{,200})@(?<hostname>#{HOSTNAME})\b/i
+  COUNTRY_CODE  = /[1-9]\d{,2}/
+  PHONE_PREFIX  = /((\b|(?<![\+\w]))0(?!0)|(?<country_code>\b00#{COUNTRY_CODE}|\+#{COUNTRY_CODE}))/
+  PHONE         = /(?<prefix>#{PHONE_PREFIX})(?<number>[ \-\(\)]{,2}(\d[ \-\(\)]{,2}){6,10}\d)\b/
+  IP_ADDRESS    = /(\d+)\.(\d+)\.(\d+)\.(\d+)/
+  INTEGER       = /-?(0|[1-9]\d*)/
+  NUMBER        = /#{INTEGER}(\.[0-9]+)?/
+  ISO_DATE      = /(?<year>\d{4})-(?<month>\d\d)-(?<day>\d\d)/
+  ISO_TIME      = /(?<hour>\d\d):(?<minute>\d\d):(?<second>\d\d)/
+  DATE_TIME     = /(?<date>#{ISO_DATE})[ T](?<time>#{ISO_TIME})/
+end
+
 class PrivacyFilter
-  attr_accessor :preserve_phone_country_code, :preserve_email_hostname, :partially_preserve_email_username
+  include Patterns
+
+  attr_accessor :preserve_email_hostname
+  attr_accessor :partially_preserve_email_username
+  attr_accessor :preserve_phone_country_code
 
   def initialize(text)
-    @preserve_phone_country_code = false
-    @preserve_email_hostname = false
-    @partially_preserve_email_username = false
     @text = text
   end
 
   def filtered
-    result = self.clone
-    result.send(:text=, filter_email)
-    result.filter_phone
+    filter_phone_numbers_in(filter_emails_in(@text))
   end
 
-private
-  attr_accessor :text
-public
-  def filter_phone
-    if preserve_phone_country_code
-      @text.gsub(/(?<country_code>(00|\+)[1-9]\d{,2})(?<phone>([ \(\)-]{,2}\d){6,11})/,'\k<country_code> [FILTERED]').
-        gsub(/(?<prefix>0)(?<phone>([ \(\)-]{,2}\d){6,11})/, '[PHONE]')
-    else
-      @text.gsub(/(?<prefix>(0|(00|\+)[1-9]\d{,2}))(?<phone>([ \(\)-]{,2}\d){6,11})/, '[PHONE]')
+  private
+
+  def filter_emails_in(text)
+    text.gsub EMAIL do
+      filtered_email $~[:username], $~[:hostname]
     end
   end
 
-  def filter_email
-    result = filter_email_partially_preserving_email_username if partially_preserve_email_username
-    result ||= filter_email_preserving_hostname if preserve_email_hostname
-    result ||= filter_whole_email
+  def filtered_email(username, hostname)
+    if preserve_email_hostname or partially_preserve_email_username
+      "#{filtered_email_username(username)}@#{hostname}"
+    else
+      '[EMAIL]'
+    end
   end
 
-  def filter_whole_email
-    hostname = /(?<name>([a-zA-Z0-9][a-zA-Z0-9-]{,60}[a-zA-Z0-9]\.)*)(?<tld>[a-zA-z]{2,3}(\.[a-zA-z]{2})?)/
-    whole_email = /(?<username>[a-zA-Z0-9][\w+\.-]{,200})@(?<hostname>#{hostname})/
-    @text.gsub(whole_email, '[EMAIL]')
+  def filtered_email_username(username)
+    if partially_preserve_email_username and username.length >= 6
+      username[0...3] + '[FILTERED]'
+    else
+      '[FILTERED]'
+    end
   end
 
-  def filter_email_preserving_hostname
-    hostname = /(?<name>([a-zA-Z0-9][a-zA-Z0-9-]{,60}[a-zA-Z0-9]\.)*)(?<tld>[a-zA-z]{2,3}(\.[a-zA-z]{2})?)/
-    whole_email = /(?<username>[a-zA-Z0-9][\w+\.-]{,200})@(?<hostname>#{hostname})/
-    @text.gsub(whole_email, '[FILTERED]@\k<hostname>')
+  def filter_phone_numbers_in(text)
+    text.gsub PHONE do
+      filtered_phone_number $~[:country_code]
+    end
   end
 
-  def filter_email_partially_preserving_email_username
-    hostname = /(?<name>([a-zA-Z0-9][a-zA-Z0-9-]{,60}[a-zA-Z0-9]\.)*)(?<tld>[a-zA-z]{2,3}(\.[a-zA-z]{2})?)/
-    @text.gsub(/\b(?<short_username>[a-zA-Z0-9][\w+\.-]{,4})@(?<hostname>#{hostname})/, '[FILTERED]@\k<hostname>').
-      gsub(/(?<_>[a-zA-Z0-9][\w+\.-]{2})[\w+\.-]{,197}@(?<hostname>#{hostname})/, '\k<_>[FILTERED]@\k<hostname>')
+  def filtered_phone_number(country_code)
+    if preserve_phone_country_code and country_code.to_s != ''
+      "#{country_code} [FILTERED]"
+    else
+      '[PHONE]'
+    end
   end
 end
 
 class Validations
-  def self.email?(value)
-    /^(?<username>[a-zA-Z0-9][\w+\.-]{,200})@(?<hostname>.*)$/ =~ value
-    self.hostname?(hostname) ? true : false
-  end
+  class << self
+    include Patterns
 
-  def self.hostname?(value)
-    /^(?<name>([a-zA-Z0-9][a-zA-Z0-9-]{,60}[a-zA-Z0-9]\.)*)(?<tld>[a-zA-z]{2,3}(\.[a-zA-z]{2})?)$/ =~ value ?
-      true : false
-  end
+    def email?(text)
+      /\A#{EMAIL}\z/ === text
+    end
 
-  def self.phone?(value)
-    /^(?<prefix>(0|(00|\+)[1-9]\d{,2}))(?<phone>([ \(\)-]{,2}\d){6,11})$/ =~ value ? true : false
-  end
+    def phone?(text)
+      /\A#{PHONE}\z/ === text
+    end
 
-  def self.ip_address?(value)
-    (/^(?<ip>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/ =~ value and
-      ip.split('.').all? { |byte| byte.to_i.between?(0, 255) }) ? true : false
-  end
+    def hostname?(text)
+      /\A#{HOSTNAME}\z/ === text
+    end
 
-  def self.number?(value)
-    /^(?<number>-?(0|[1-9][0-9]*)(\.[0-9]+)?)$/ =~ value ? true : false
-  end
+    def ip_address?(text)
+      /\A#{IP_ADDRESS}\z/ === text and
+        $~.captures.all? { |byte| byte.to_i.between?(0, 255) }
+    end
 
-  def self.integer?(value)
-    /^(?<integer>-?(0|[1-9][0-9]*))$/ =~ value ? true : false
-  end
+    def number?(text)
+      /\A#{NUMBER}\z/ === text
+    end
 
-  def self.date?(value)
-    (/^(?<year>[0-9]{4})-(?<month>[0-9]{2})-(?<day>[0-9]{2})$/ =~ value and
-      month.to_i.to_i.between?(1, 12) and day.to_i.between?(1, 31)) ? true : false
-  end
+    def integer?(text)
+      /\A#{INTEGER}\z/ === text
+    end
 
-  def self.time?(value)
-    (/^(?<hours>[0-9]{2}):(?<minutes>[0-9]{2}):(?<seconds>[0-9]{2})$/ =~ value and
-      hours.to_i.between?(0, 23) and minutes.to_i.between?(0, 59) and seconds.to_i.between?(0, 59)) ? true : false
-  end
+    def date?(text)
+      /\A#{ISO_DATE}\z/ === text and
+        $~[:month].to_i.between?(1, 12) and $~[:day].to_i.between?(1, 31)
+    end
 
-  def self.date_time?(value)
-    (/^(?<date>.*)( |T)(?<time>.*)$/ =~ value and self.date?(date) and self.time?(time)) ? true : false
+    def time?(text)
+      /\A#{ISO_TIME}\z/ === text and
+        $~[:hour].to_i.between?(0, 23) and
+        $~[:minute].to_i.between?(0, 59) and
+        $~[:second].to_i.between?(0, 59)
+    end
+
+    def date_time?(text)
+      /\A#{DATE_TIME}\z/ === text and
+        date?($~[:date]) and time?($~[:time])
+    end
   end
 end
+

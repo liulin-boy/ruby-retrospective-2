@@ -1,40 +1,31 @@
 class Integer
-  def prime_divisors
-    def prime?
-      return false if self < 2
-   	  (2..(self / 2)).each do |i|
-	    return false if self.remainder(i) == 0
-	  end
-	  true
-	end
-   return (-self).prime_divisors if self < 0
-   (1..self).select { |n| n.prime? and self.remainder(n) == 0 }
+   def prime_divisors
+    2.upto(abs).select do |n|
+      2.upto(n.pred).none? { |d| n.remainder(d).zero? } and remainder(n).zero?
+    end
   end
 end
 
 class Range
 	def fizzbuzz
-	  map do |n|
-	    if n.remainder(3) == 0
-		  n.remainder(5) == 0 ? :fizzbuzz : :fizz
-        else
-         n.remainder(5) == 0 ? :buzz : n
-        end
+    map do |n|
+      if    n % 15 == 0 then :fizzbuzz
+      elsif n % 3  == 0 then :fizz
+      elsif n % 5  == 0 then :buzz
+      else n
       end
-	end
+    end
+  end
 end
 
 class Hash
   def group_values
-    v = values.uniq.map do |val|
-	  [val, keys.select { |key| self[key] == val } ]
-    end
-	Hash[v]
+    keys.group_by { |key| self[key] }
   end
 end
 
 class Array
   def densities
-    map { |elem| select { |x| x == elem }.size }
+    map { |elem| count elem }
   end
 end
