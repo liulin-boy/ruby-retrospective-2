@@ -1,5 +1,5 @@
 class Integer
-   def prime_divisors
+  def prime_divisors
     2.upto(abs).select do |n|
       2.upto(n.pred).none? { |d| n.remainder(d).zero? } and remainder(n).zero?
     end
